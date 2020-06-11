@@ -1,7 +1,7 @@
 import unittest
 
-from src.masonite.orm.collection.Collection import Collection
-from src.masonite.orm.factories.Factory import Factory as factory
+from src.masonite.orm.collection import Collection
+from src.masonite.orm.factories import Factory as factory
 from src.masonite.orm.models import Model
 
 
@@ -24,6 +24,7 @@ class TestCollection(unittest.TestCase):
     def test_pluck(self):
         collection = Collection([{"id": 1, "name": "Joe"}, {"id": 2, "name": "Bob"}])
         self.assertEqual(collection.pluck("id"), [1, 2])
+        self.assertEqual(collection.pluck("id").serialize(), [1, 2])
         self.assertEqual(collection.pluck("name", "id"), {1: "Joe", 2: "Bob"})
 
     def test_pluck_with_models(self):
@@ -472,6 +473,10 @@ class TestCollection(unittest.TestCase):
                 {"code": "USD"},
             ],
         )
+
+    # def test_serialize_models(self):
+    #     collection = Collection([Model.hydrate({'id': 1}), Model.hydrate({'id': 2})])
+    #     print(collection.serialize())
 
     def test_json(self):
         collection = Collection(

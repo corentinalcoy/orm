@@ -62,6 +62,12 @@ class BaseGrammar:
         self._sql = ""
 
         self._sql_qmark = ""
+        self._action = "select"
+        self.queries = []
+
+    def compile(self, action):
+        self._action = action
+        return getattr(self, "_compile_" + action)()
 
     def _compile_create(self):
         """Compiles a query for creating new table schemas.
@@ -110,7 +116,9 @@ class BaseGrammar:
                 column=self._compile_column(column.column_name),
                 old_column=self._compile_column(column.old_column),
                 data_type=self.type_map.get(column.column_type, ""),
-                length=self.create_column_length().format(length=column.length)
+                length=self.create_column_length(column.column_type).format(
+                    length=column.length
+                )
                 if column.length
                 else "",
                 nullable=nullable,
@@ -180,13 +188,22 @@ class BaseGrammar:
         for column in self._creates:
 
             length_string = (
-                self.create_column_length().format(length=column.length)
+                self.create_column_length(column.column_type).format(
+                    length=column.length
+                )
                 if column.length
                 else ""
             )
+
             mapped_time_value = self.timestamp_mapping.get(column.default)
 
             default_value = mapped_time_value or column.default
+
+            if hasattr(self, f"_type_{column.column_type}"):
+                sql += getattr(self, f"_type_{column.column_type}")(
+                    column, length_string, default_value
+                )
+                continue
 
             attributes = {
                 "column": self._compile_column(column.column_name),
@@ -222,6 +239,40 @@ class BaseGrammar:
 
         return self._compile_column(columns)
 
+    def _compile_create_constraint_as_query(self, column):
+        """Compiles constraints for creation schema.
+
+        Returns:
+            self
+        """
+        if not self.options["can_compile_multiple_index"] and isinstance(
+            column.column_name, list
+        ):
+            for index_column in column.column_name:
+                query = getattr(
+                    self, "{}_constraint_string".format(column.constraint_type)
+                )().format(
+                    column=self._compile_column(index_column),
+                    clean_column=index_column,
+                    index_name=column.index_name,
+                    table=self._compile_table(self.table),
+                    clean_table=self.table,
+                    separator="",
+                )
+                self.queries.append(query.rstrip(" "))
+        else:
+            query = getattr(
+                self, "{}_constraint_string".format(column.constraint_type)
+            )().format(
+                column=self._get_multiple_columns(column.column_name),
+                clean_column=column.column_name,
+                index_name=column.index_name,
+                table=self._compile_table(self.table),
+                clean_table=self.table,
+                separator="",
+            )
+            self.queries.append(query.rstrip(" "))
+
     def _compile_create_constraints(self):
         """Compiles constraints for creation schema.
 
@@ -229,17 +280,62 @@ class BaseGrammar:
             self
         """
         sql = " "
+
         for column in self._constraints:
+            if self.options.get(
+                "create_constraints_as_separate_queries"
+            ) and column.constraint_type in self.options.get(
+                "second_query_constraints"
+            ):
+                self._compile_create_constraint_as_query(column)
+                continue
+
             sql += getattr(
                 self, "{}_constraint_string".format(column.constraint_type)
             )().format(
                 column=self._get_multiple_columns(column.column_name),
                 clean_column=column.column_name,
                 index_name=column.index_name,
+                table=self._compile_table(self.table),
+                clean_table=self.table,
                 separator=", ",
             )
 
         return sql.rstrip(", ")
+
+    def _compile_alter_constraint_as_query(self, column, action):
+        """Compiles constraints for creation schema.
+
+        Returns:
+            self
+        """
+        if not self.options["can_compile_multiple_index"] and isinstance(
+            column.column_name, list
+        ):
+            for index_column in column.column_name:
+                query = getattr(
+                    self, "{}_{}_column_string".format(action, column.constraint_type)
+                )().format(
+                    column=self._compile_column(index_column),
+                    clean_column=index_column,
+                    index_name=column.index_name,
+                    table=self._compile_table(self.table),
+                    clean_table=self.table,
+                    separator="",
+                )
+                self.queries.append(query.rstrip(" "))
+        else:
+            query = getattr(
+                self, "{}_{}_column_string".format(action, column.constraint_type)
+            )().format(
+                column=self._get_multiple_columns(column.column_name),
+                clean_column=column.column_name,
+                index_name=column.index_name,
+                table=self._compile_table(self.table),
+                clean_table=self.table,
+                separator="",
+            )
+            self.queries.append(query.rstrip(" "))
 
     def _compile_alter_constraints(self):
         """Compiles constraints for alter schema.
@@ -249,12 +345,23 @@ class BaseGrammar:
         """
         sql = " "
         for column in self._constraints:
+            if self.options.get(
+                "alter_constraints_as_separate_queries"
+            ) and column.constraint_type in self.options.get(
+                "second_query_constraints"
+            ):
+                self._compile_alter_constraint_as_query(column, column.action)
+                continue
+
             sql += getattr(
-                self, "{}_alter_constraint_string".format(column.constraint_type)
+                self,
+                "{}_{}_column_string".format(column.action, column.constraint_type,),
             )().format(
                 column=self._get_multiple_columns(column.column_name),
                 clean_column=column.column_name,
                 index_name=column.index_name,
+                table=self._compile_table(self.table),
+                clean_table=self.table,
                 separator=", ",
             )
 
@@ -298,7 +405,7 @@ class BaseGrammar:
             self
         """
         self._sql = self.update_format().format(
-            key_equals=self._compile_key_value_equals(qmark=qmark),
+            key_equals=self._compile_key_value_equals(qmark=qmark, action="update"),
             table=self._compile_table(self.table),
             wheres=self._compile_wheres(qmark=qmark),
         )
@@ -337,7 +444,7 @@ class BaseGrammar:
         self._sql = self.insert_format().format(
             key_equals=self._compile_key_value_equals(),
             table=self._compile_table(self.table),
-            columns=self._compile_columns(separator=", "),
+            columns=self._compile_columns(separator=", ", action="insert"),
             values=self._compile_values(separator=", "),
         )
 
@@ -357,7 +464,7 @@ class BaseGrammar:
 
         return self
 
-    def _compile_key_value_equals(self, qmark=False):
+    def _compile_key_value_equals(self, qmark=False, action="select"):
         """Compiles key value pairs.
 
         Keyword Arguments:
@@ -392,6 +499,7 @@ class BaseGrammar:
                 sql += sql_string.format(
                     column=self._table_column_string(column),
                     value=value if not qmark else "?",
+                    separator=",",
                 )
                 if qmark:
                     self._bindings += (value,)
@@ -594,9 +702,13 @@ class BaseGrammar:
                     column=self._table_column_string(where.column),
                     keyword=keyword,
                 )
-            elif value is None:
+            elif value_type == "value_equals":
+                sql_string = self.value_equal_string().format(
+                    value1=where.column, value2=where.value, keyword=keyword
+                )
+            elif value_type == "NULL":
                 sql_string = self.where_null_string()
-            elif value is True:
+            elif value_type == "NOT NULL":
                 sql_string = self.where_not_null_string()
             elif equality == "EXISTS":
                 sql_string = self.where_exists_string()
@@ -629,7 +741,9 @@ class BaseGrammar:
                 query_value = query_value.rstrip(",").rstrip(", ") + ")"
             elif qmark:
                 query_value = "'?'"
-                self.add_binding(value)
+                print("qmark", value)
+                if value is not True and value_type != "value_equals":
+                    self.add_binding(value)
             elif value_type == "value":
                 query_value = self.value_string().format(value=value, separator="")
             elif value_type == "column":
@@ -689,6 +803,7 @@ class BaseGrammar:
         """
         return self.column_exists_string().format(
             table=self._compile_table(self.table),
+            clean_table=self.table,
             value=self._compile_value(self._column),
         )
 
@@ -698,7 +813,6 @@ class BaseGrammar:
         Returns:
             string
         """
-
         return re.sub(" +", " ", self._sql.strip())
 
     def to_qmark(self):
@@ -709,7 +823,7 @@ class BaseGrammar:
         """
         return re.sub(" +", " ", self._sql.strip())
 
-    def _compile_columns(self, separator=""):
+    def _compile_columns(self, separator="", action="select"):
         """Specifies the columns in a selection expression.
 
         Keyword Arguments:
@@ -728,6 +842,33 @@ class BaseGrammar:
 
                     column = column.column
                 sql += self._table_column_string(column, separator=separator)
+
+        if self._aggregates:
+            sql += self._compile_aggregates()
+
+        if sql == "":
+            return "*"
+        return sql.rstrip(",").rstrip(", ")
+
+    def _compile_insert_columns(self, separator=""):
+        """Specifies the columns in a selection expression.
+
+        Keyword Arguments:
+            separator {str} -- The separator used between columns (default: {""})
+
+        Returns:
+            self
+        """
+        sql = ""
+        if self._columns != "*":
+            for column in self._columns:
+                if isinstance(column, SelectExpression):
+                    if column.raw:
+                        sql += column.column
+                        continue
+
+                    column = column.column
+                sql += self._table_insert_column_string(column, separator=separator)
 
         if self._aggregates:
             sql += self._compile_aggregates()
@@ -788,7 +929,7 @@ class BaseGrammar:
         if column and "." in column:
             table, column = column.split(".")
 
-        return self.table_column_string().format(
+        return self.column_strings.get(self._action).format(
             column=column, separator=separator, table=table or self.table
         )
 

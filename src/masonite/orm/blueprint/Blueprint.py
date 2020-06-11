@@ -114,13 +114,16 @@ class Column:
 
 
 class Constraint:
-    def __init__(self, column, constraint_type):
+    def __init__(self, column, constraint_type, action="create"):
         self.column_name = column
+        self.action = action
         self.constraint_type = constraint_type
         if isinstance(column, (list, tuple)):
-            self.index_name = "_".join(column) + "_" + constraint_type
+            self.index_name = "_".join(column)
         else:
-            self.index_name = column + "_" + constraint_type
+            self.index_name = column
+        if "_" + constraint_type not in self.index_name:
+            self.index_name += "_" + constraint_type
 
 
 class ForeignKey:
@@ -269,8 +272,21 @@ class Blueprint:
         self._columns += (self._last_column,)
         return self
 
-    def big_increments(self):
-        pass
+    def big_increments(self, column, nullable=False):
+        """Sets a column to be the the big integer increments representation for the table
+
+        Arguments:
+            column {string} -- The column name.
+
+        Keyword Arguments:
+            nullable {bool} -- Whether the column is nullable. (default: {False})
+
+        Returns:
+            self
+        """
+        self._last_column = self.new_column("big_increments", column, None, nullable)
+        self._columns += (self._last_column,)
+        return self
 
     def binary(self, column, nullable=False):
         """Sets a column to be the binary representation for the table.
@@ -384,6 +400,7 @@ class Blueprint:
         created_at = self.new_column(
             "timestamp", "created_at", None, nullable=False
         ).use_current()
+
         updated_at = self.new_column(
             "timestamp", "updated_at", None, nullable=False
         ).use_current()
@@ -415,8 +432,21 @@ class Blueprint:
         self._columns += (self._last_column,)
         return self
 
-    def double(self):
-        pass
+    def double(self, column, nullable=False):
+        """Sets a column to be the the double representation for the table
+
+        Arguments:
+            column {string} -- The column name.
+
+        Keyword Arguments:
+            nullable {bool} -- Whether the column is nullable. (default: {False})
+
+        Returns:
+            self
+        """
+        self._last_column = self.new_column("double", column, None, nullable)
+        self._columns += (self._last_column,)
+        return self
 
     def enum(self, column, options=[], nullable=False):
         """Sets a column to be the enum representation for the table.
@@ -473,8 +503,21 @@ class Blueprint:
         self._columns += (self._last_column,)
         return self
 
-    def unsigned_integer(self):
-        pass
+    def unsigned_integer(self, column, nullable=False):
+        """Sets a column to be the unsigned integer representation for the table.
+
+        Arguments:
+            column {string} -- The column name.
+
+        Keyword Arguments:
+            nullable {bool} -- Whether the column is nullable. (default: {False})
+
+        Returns:
+            self
+        """
+        self._last_column = self.new_column("unsigned_integer", column, None, nullable)
+        self._columns += (self._last_column,)
+        return self
 
     def to_sql(self):
         """Compiles the blueprint class into a sql statement.
@@ -512,7 +555,7 @@ class Blueprint:
         if self._dry:
             return
 
-        return self._connection.make_connection().query(self.to_sql())
+        return self._connection.make_connection().query(self.to_sql(), ())
 
     def nullable(self):
         """Sets the last column created as nullable
@@ -702,10 +745,13 @@ class Blueprint:
             indexes = [indexes]
 
         for index in indexes:
-            self._last_column = self.new_column(
-                None, index, None, None, action="drop_index"
+            # self._last_column = self.new_column(
+            #     None, index, None, None, action="drop_index"
+            # )
+            # self._columns += (self._last_column,)
+            self._constraints += (
+                Constraint(index, constraint_type="index", action="drop"),
             )
-            self._columns += (self._last_column,)
         return self
 
     def drop_unique(self, indexes):
@@ -721,22 +767,29 @@ class Blueprint:
             indexes = [indexes]
 
         for index in indexes:
-            self._last_column = self.new_column(
-                None, index, None, None, action="drop_unique"
+            # self._last_column = self.new_column(
+            #     None, index, None, None, action="drop_unique"
+            # )
+            self._constraints += (
+                Constraint(index, constraint_type="unique", action="drop"),
             )
-            self._columns += (self._last_column,)
         return self
 
-    def drop_primary(self):
+    def drop_primary(self, index=""):
         """Drops a primary key index.
 
         Returns:
             self
         """
-        self._last_column = self.new_column(
-            None, None, None, None, action="drop_primary"
+        # self._last_column = self.new_column(
+        #     None, None, None, None, action="drop_primary"
+        # )
+
+        index = self.grammar().primary_key_string().format(table=self.table)
+        self._constraints += (
+            Constraint(index, constraint_type="primary", action="drop"),
         )
-        self._columns += (self._last_column,)
+        # self._columns += (self._last_column,)
         return self
 
     def drop_foreign(self, indexes):
@@ -751,15 +804,17 @@ class Blueprint:
         if isinstance(indexes, str):
             indexes = [indexes]
 
-        for key in indexes:
-            if not key.startswith(self.table):
-                key = self.table + "_" + key
-            if not key.endswith("foreign"):
-                key = key + "_foreign"
+        for index in indexes:
+            if not index.startswith(self.table):
+                index = self.table + "_" + index
+            if not index.endswith("foreign"):
+                index = index + "_foreign"
 
-            self._last_column = self.new_column(
-                None, key, None, None, action="drop_foreign"
+            # self._last_column = self.new_column(
+            #     None, key, None, None, action="drop_foreign"
+            # )
+            # self._last_column.is_constraint = True
+            self._constraints += (
+                Constraint(index, constraint_type="foreign", action="drop"),
             )
-            self._last_column.is_constraint = True
-            self._columns += (self._last_column,)
         return self

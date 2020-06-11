@@ -4,17 +4,37 @@ import unittest
 from src.masonite.orm.builder import QueryBuilder
 from src.masonite.orm.grammar import MySQLGrammar
 from src.masonite.orm.models import Model
+from src.masonite.orm.relationships import has_many
 from tests.utils import MockConnectionFactory
+
+
+class Articles(Model):
+    pass
+
+
+class User(Model):
+    @has_many("id", "user_id")
+    def articles(self):
+        return Articles
 
 
 class BaseTestQueryBuilder:
     def get_builder(self, table="users"):
         connection = MockConnectionFactory().make("default")
-        return QueryBuilder(self.grammar, connection, table=table, owner=Model)
+        return QueryBuilder(self.grammar, connection, table=table, owner=User)
 
     def test_sum(self):
         builder = self.get_builder()
         builder.sum("age")
+
+        sql = getattr(
+            self, inspect.currentframe().f_code.co_name.replace("test_", "")
+        )()
+        self.assertEqual(builder.to_sql(), sql)
+
+    def test_with_(self):
+        builder = self.get_builder()
+        builder.with_("articles").sum("age")
 
         sql = getattr(
             self, inspect.currentframe().f_code.co_name.replace("test_", "")
@@ -47,13 +67,13 @@ class BaseTestQueryBuilder:
         )()
         self.assertEqual(builder.to_sql(), sql)
 
-    # def test_all(self):
-    #     builder = self.get_builder()
-    #     builder.all()
-    #     sql = getattr(
-    #         self, inspect.currentframe().f_code.co_name.replace("test_", "")
-    #     )()
-    #     self.assertEqual(builder.to_sql(), sql)
+    def test_all(self):
+        builder = self.get_builder()
+        builder.all()
+        sql = getattr(
+            self, inspect.currentframe().f_code.co_name.replace("test_", "")
+        )()
+        self.assertEqual(builder.to_sql(), sql)
 
     def test_get(self):
         builder = self.get_builder()
@@ -291,6 +311,7 @@ class BaseTestQueryBuilder:
     def test_builder_alone(self):
         self.assertTrue(
             QueryBuilder(
+                dry=True,
                 connection_details={
                     "default": "mysql",
                     "mysql": {
@@ -304,7 +325,7 @@ class BaseTestQueryBuilder:
                         "grammar": "mysql",
                         "options": {"charset": "utf8mb4",},
                     },
-                }
+                },
             ).table("users")
         )
 
@@ -356,6 +377,10 @@ class BaseTestQueryBuilder:
         )()
         self.assertEqual(builder.to_sql(), sql)
 
+    def test_get_schema_builder(self):
+        builder = self.get_builder()
+        self.assertTrue(builder.get_schema_builder())
+
 
 class MySQLQueryBuilderTest(BaseTestQueryBuilder, unittest.TestCase):
     grammar = MySQLGrammar
@@ -364,6 +389,13 @@ class MySQLQueryBuilderTest(BaseTestQueryBuilder, unittest.TestCase):
         """
             builder = self.get_builder()
             builder.sum('age')
+        """
+        return "SELECT SUM(`users`.`age`) AS age FROM `users`"
+
+    def with_(self):
+        """
+            builder = self.get_builder()
+            builder.with_('articles').sum('age')
         """
         return "SELECT SUM(`users`.`age`) AS age FROM `users`"
 

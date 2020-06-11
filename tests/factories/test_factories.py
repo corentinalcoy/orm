@@ -3,8 +3,7 @@ import unittest
 
 from src.masonite.orm import Factory as factory
 from src.masonite.orm.builder import QueryBuilder
-from src.masonite.orm.grammar import GrammarFactory
-from src.masonite.orm.grammar.mysql_grammar import MySQLGrammar
+from src.masonite.orm.grammar import GrammarFactory, MySQLGrammar
 from src.masonite.orm.models import Model
 
 
@@ -44,3 +43,7 @@ class TestFactories(unittest.TestCase):
     def test_can_make_named_factory(self):
         user = factory(User).make(name="admin")
         self.assertEqual(user.admin, 1)
+
+    # def test_can_create(self):
+    #     user = factory(User).create()
+    #     self.assertTrue(user.name)

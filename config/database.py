@@ -3,6 +3,7 @@
 import os
 
 from masonite.environment import LoadEnvironment, env
+from src.masonite.orm.builder import QueryBuilder
 
 """
 |--------------------------------------------------------------------------
@@ -20,12 +21,12 @@ The connections here don't determine the database but determine the "connection"
 They can be named whatever you want.
 """
 
-CONNECTIONS = {
+DATABASES = {
     'default': 'mysql',
     'mysql': {
         'driver': 'mysql',
         'host': 'localhost',
-        'username': 'root',
+        'user': 'root',
         'password': '',
         'database': 'orm',
         'port': '3306',
@@ -35,12 +36,24 @@ CONNECTIONS = {
             'charset': 'utf8mb4',
         },
     },
+    'postgres': {
+        'driver': 'postgres',
+        'host': 'localhost',
+        'user': 'postgres',
+        'password': 'postgres',
+        'database': 'orm',
+        'port': '5432',
+        'prefix': '',
+        'grammar': 'postgres',
+    },
     'sqlite': {
         'driver': 'sqlite',
-        'database': 'orm.db',
+        'database': 'orm.sqlite3',
         'prefix': ''
     }
 }
+
+# DB = QueryBuilder(connection_details=DATABASES)
 
 # DATABASES = {
 #     'default': os.environ.get('DB_DRIVER'),

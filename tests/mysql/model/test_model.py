@@ -1,9 +1,14 @@
+import json
+import os
 import unittest
-from src.masonite.orm.grammar.mssql_grammar import MSSQLGrammar
+
+import pendulum
+import datetime
+
 from app.User import User
 from src.masonite.orm.collection import Collection
+from src.masonite.orm.grammar.mssql_grammar import MSSQLGrammar
 from src.masonite.orm.models import Model
-import os
 
 if os.getenv("RUN_MYSQL_DATABASE", False) == "True":
 
@@ -15,6 +20,15 @@ if os.getenv("RUN_MYSQL_DATABASE", False) == "True":
         __fillable__ = ["*"]
         __table__ = "profiles"
 
+    class ProfileGuarded(Model):
+        __guarded__ = ["email"]
+        __table__ = "profiles"
+
+    class ProfileSerialize(Model):
+        __fillable__ = ["*"]
+        __table__ = "profiles"
+        __hidden__ = ["password"]
+
     class Profile(Model):
         pass
 
@@ -22,7 +36,9 @@ if os.getenv("RUN_MYSQL_DATABASE", False) == "True":
         pass
 
     class User(Model):
-        pass
+        @property
+        def meta(self):
+            return {"is_subscribed": True}
 
     class ProductNames(Model):
         pass
@@ -38,6 +54,25 @@ if os.getenv("RUN_MYSQL_DATABASE", False) == "True":
             )
 
         def test_can_use_fillable_asterisk(self):
+            sql = ProfileFillAsterisk.create(
+                {"name": "Joe", "email": "user@example.com"}, query=True
+            )
+
+            self.assertEqual(
+                sql,
+                "INSERT INTO `profiles` (`profiles`.`name`, `profiles`.`email`) VALUES ('Joe', 'user@example.com')",
+            )
+
+        def test_can_use_guarded(self):
+            sql = ProfileGuarded.create(
+                {"name": "Joe", "email": "user@example.com"}, query=True
+            )
+
+            self.assertEqual(
+                sql, "INSERT INTO `profiles` (`profiles`.`name`) VALUES ('Joe')"
+            )
+
+        def test_can_use_guarded_asterisk(self):
             sql = ProfileFillAsterisk.create(
                 {"name": "Joe", "email": "user@example.com"}, query=True
             )
@@ -76,8 +111,63 @@ if os.getenv("RUN_MYSQL_DATABASE", False) == "True":
 
             self.assertEqual(profile.serialize(), {"name": "Joe", "id": 1})
 
+        def test_json(self):
+            profile = ProfileFillAsterisk.hydrate({"name": "Joe", "id": 1})
+
+            self.assertEqual(profile.to_json(), '{"name": "Joe", "id": 1}')
+
+        def test_serialize_with_hidden(self):
+            profile = ProfileSerialize.hydrate(
+                {"name": "Joe", "id": 1, "password": "secret"}
+            )
+
+            self.assertTrue(profile.serialize().get("name"))
+            self.assertTrue(profile.serialize().get("id"))
+            self.assertFalse(profile.serialize().get("password"))
+
+        def test_serialize_with_appends(self):
+            user = User.hydrate({"name": "Joe", "id": 1})
+
+            user.set_appends(["meta"])
+
+            serialized = user.serialize()
+            self.assertEqual(serialized["id"], 1)
+            self.assertEqual(serialized["name"], "Joe")
+            self.assertEqual(serialized["meta"]["is_subscribed"], True)
+
+        def test_serialize_with_date(self):
+            user = User.hydrate({"name": "Joe", "created_at": pendulum.now()})
+
+            self.assertTrue(json.dumps(user.serialize()))
+
+        def test_set_as_date(self):
+            user = User.hydrate(
+                {
+                    "name": "Joe",
+                    "created_at": datetime.datetime.now() + datetime.timedelta(days=1),
+                }
+            )
+
+            self.assertTrue(user.created_at)
+            self.assertTrue(user.created_at.is_future())
+
+        def test_hydrate_with_none(self):
+            profile = ProfileFillAsterisk.hydrate(None)
+
+            self.assertEqual(profile, None)
+
+        def test_can_find_first(self):
+            profile = User.find(1)
+            print(profile)
+
+        def test_can_print_none(self):
+            print(User.where("remember_token", "10").first())
+
         def test_serialize_with_dirty_attribute(self):
             profile = ProfileFillAsterisk.hydrate({"name": "Joe", "id": 1})
 
             profile.age = 18
             self.assertEqual(profile.serialize(), {"age": 18, "name": "Joe", "id": 1,})
+
+        def test_attribute_check_with_hasattr(self):
+            self.assertFalse(hasattr(Profile(), "__password__"))

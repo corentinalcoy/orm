@@ -9,7 +9,7 @@ class BaseTestCreateGrammar:
     schema = Schema.dry().on("mysql")
 
     def setUp(self):
-        pass
+        self.maxDiff = None
 
     def test_can_compile_column(self):
         with self.schema.create("users") as blueprint:
@@ -142,6 +142,7 @@ class BaseTestCreateGrammar:
             blueprint.string("email")
             blueprint.string("password")
             blueprint.integer("age").nullable()
+            blueprint.unsigned_integer("quantity")
             blueprint.enum("type", ["Open", "Closed"])
             blueprint.datetime("pick_up")
             blueprint.binary("profile")
@@ -151,6 +152,8 @@ class BaseTestCreateGrammar:
             blueprint.decimal("credit", 17, 6)
             blueprint.text("description")
             blueprint.unsigned("bank").nullable()
+            blueprint.double("percentage")
+            blueprint.big_increments("clicks")
 
         sql = getattr(
             self, inspect.currentframe().f_code.co_name.replace("test_", "")
@@ -358,7 +361,7 @@ class BaseTestCreateGrammar:
 class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
     def setUp(self):
         self.schema = Schema.on("mysql")
-        self.maxDiff = 999
+        self.maxDiff = None
 
     def can_compile_column(self):
         """
@@ -407,7 +410,7 @@ class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
 
         return (
             "CREATE TABLE `users` ("
-            "`id` INT AUTO_INCREMENT PRIMARY KEY NOT NULL, "
+            "`id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY NOT NULL, "
             "`name` VARCHAR(255) NOT NULL"
             ")"
         )
@@ -421,7 +424,7 @@ class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
 
         return (
             "CREATE TABLE `users` ("
-            "`id` INT AUTO_INCREMENT PRIMARY KEY NOT NULL, "
+            "`id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY NOT NULL, "
             "`name` VARCHAR(255) NOT NULL, "
             "CONSTRAINT name_unique UNIQUE (name)"
             ")"
@@ -572,19 +575,22 @@ class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
     def can_compile_large_blueprint(self):
         """
         with self.schema.create('users') as blueprint:
-            blueprint.string('name')
-            blueprint.string('email')
-            blueprint.string('password')
-            blueprint.integer('age').nullable()
-            blueprint.enum('type', ['Open', 'Closed'])
-            blueprint.datetime('pick_up')
-            blueprint.binary('profile')
-            blueprint.boolean('of_age')
-            blueprint.char('first_initial', length=4)
-            blueprint.date('birthday')
-            blueprint.decimal('credit', 17,6)
-            blueprint.text('description')
-            blueprint.unsigned('bank').nullable()
+            blueprint.string("name")
+            blueprint.string("email")
+            blueprint.string("password")
+            blueprint.integer("age").nullable()
+            blueprint.unsigned_integer('quantity')
+            blueprint.enum("type", ["Open", "Closed"])
+            blueprint.datetime("pick_up")
+            blueprint.binary("profile")
+            blueprint.boolean("of_age")
+            blueprint.char("first_initial", length=4)
+            blueprint.date("birthday")
+            blueprint.decimal("credit", 17, 6)
+            blueprint.text("description")
+            blueprint.unsigned("bank").nullable()
+            blueprint.double('percentage')
+            blueprint.big_increments('clicks')
         """
 
         return (
@@ -593,6 +599,7 @@ class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
             "`email` VARCHAR(255) NOT NULL, "
             "`password` VARCHAR(255) NOT NULL, "
             "`age` INT(11), "
+            "`quantity` INT UNSIGNED NOT NULL, "
             "`type` ENUM('Open','Closed') NOT NULL, "
             "`pick_up` DATETIME NOT NULL, "
             "`profile` LONGBLOB NOT NULL, "
@@ -601,8 +608,9 @@ class TestMySQLCreateGrammar(BaseTestCreateGrammar, unittest.TestCase):
             "`birthday` DATE NOT NULL, "
             "`credit` DECIMAL(17, 6) NOT NULL, "
             "`description` TEXT NOT NULL, "
-            "`bank` INT UNSIGNED"
-            ")"
+            "`bank` INT UNSIGNED, "
+            "`percentage` DOUBLE NOT NULL, "
+            "`clicks` BIGINT AUTO_INCREMENT NOT NULL)"
         )
 
     def test_default_string_length(self):

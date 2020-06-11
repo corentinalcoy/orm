@@ -7,12 +7,14 @@ from src.masonite.orm.models import Model
 
 
 class User(Model):
+    __dry__ = True
+
     @scope
-    def active(query, status):
+    def active(self, query, status):
         return query.where("active", status)
 
     @scope
-    def gender(query, status):
+    def gender(self, query, status):
         return query.where("gender", status)
 
 
@@ -43,6 +45,16 @@ class TestMySQLScopes(unittest.TestCase):
         sql = "SELECT * FROM `users` WHERE `users`.`name` = 'joe' AND `users`.`deleted_at` IS NOT NULL"
         self.assertEqual(
             sql, User.apply_scope(SoftDeletes).where("name", "joe").to_sql()
+        )
+
+    def test_can_use_global_scopes_on_delete(self):
+        sql = "UPDATE `users` SET `users`.`deleted_at` = 'now' WHERE `users`.`name` = 'joe'"
+        self.assertEqual(
+            sql,
+            User.apply_scope(SoftDeletes)
+            .where("name", "joe")
+            .delete(query=True)
+            .to_sql(),
         )
 
     def test_can_use_global_scopes_on_time(self):

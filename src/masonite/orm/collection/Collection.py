@@ -210,12 +210,11 @@ class Collection:
         items = [callback(x) for x in self]
         return self.__class__(items)
 
-    def map_into(self, cls, method=None):
+    def map_into(self, cls, method=None, **kwargs):
         results = []
         for item in self:
-
             if method:
-                results.append(getattr(cls, method)(item))
+                results.append(getattr(cls, method)(item, **kwargs))
             else:
                 results.append(cls(item))
 
@@ -236,11 +235,17 @@ class Collection:
             attributes = {}
         else:
             attributes = []
+
+        if isinstance(self._items, dict):
+            return Collection([self._items.get(value)])
+
         for item in self:
             if isinstance(item, dict):
                 iterable = item.items()
-            else:
+            elif hasattr(item, "serialize"):
                 iterable = item.serialize().items()
+            else:
+                iterable = self.all().items()
 
             for k, v in iterable:
                 if k == value:
@@ -251,7 +256,7 @@ class Collection:
                     else:
                         attributes.append(v)
 
-        return attributes
+        return Collection(attributes)
 
     def pop(self):
         last = self._items.pop()
@@ -295,6 +300,12 @@ class Collection:
 
         return list(map(_serialize, self))
 
+    def add_relation(self, result={}):
+        for model in self._items:
+            model.add_relations(result)
+
+        return self
+
     def shift(self):
         return self.pull(0)
 
@@ -324,11 +335,19 @@ class Collection:
 
         keys = set()
         items = []
+        if isinstance(self.all(), dict):
+            return self
 
         for item in self:
-            if not item[key] in keys:
+            if isinstance(item, dict):
+                comparison = item.get(key)
+            elif isinstance(item, str):
+                comparison = item
+            else:
+                comparison = getattr(item, key)
+            if comparison not in keys:
                 items.append(item)
-                keys.add(item[key])
+                keys.add(comparison)
 
         return self.__class__(items)
 
@@ -343,7 +362,11 @@ class Collection:
         attributes = []
 
         for item in self._items:
-            if self._make_comparison(item.get(key), value, op):
+            if isinstance(item, dict):
+                comparison = item.get(key)
+            else:
+                comparison = getattr(item, key)
+            if self._make_comparison(comparison, value, op):
                 attributes.append(item)
 
         return self.__class__(attributes)

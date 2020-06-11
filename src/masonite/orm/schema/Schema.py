@@ -4,8 +4,7 @@ from ..blueprint import Blueprint
 
 class Schema:
 
-    _connection = ConnectionFactory().make("default")
-    _grammer = None
+    _grammar = None
     _default_string_length = "255"
     _dry = False
 
@@ -35,7 +34,6 @@ class Schema:
             cls
         """
         cls._dry = True
-        print("calling dry", cls._dry)
         return cls
 
     @classmethod
@@ -53,7 +51,7 @@ class Schema:
         cls._table = table
 
         return Blueprint(
-            cls._connection.get_grammer(),
+            cls._connection.get_grammar(),
             connection=cls._connection,
             table=table,
             action="create",
@@ -75,7 +73,7 @@ class Schema:
         """
         cls._table = table
         return Blueprint(
-            cls._connection.get_grammer(),
+            cls._connection.get_grammar(),
             table=table,
             action="alter",
             default_string_length=cls._default_string_length,
@@ -92,11 +90,11 @@ class Schema:
         Returns:
             masonite.orm.blueprint.Blueprint -- The Masonite ORM blueprint object.
         """
-        grammar = cls._connection.get_grammer()(table=table)
+        grammar = cls._connection.get_grammar()(table=table)
         query = grammar.column_exists(column).to_sql()
         if query_only:
             return query
-        return bool(cls._connection().make_connection().query(query))
+        return bool(cls._connection().make_connection().query(query, ()))
 
     @classmethod
     def set_default_string_length(cls, length):
@@ -105,11 +103,11 @@ class Schema:
 
     @classmethod
     def drop_table(cls, table, query_only=False):
-        grammar = cls._connection.get_grammer()(table=table)
+        grammar = cls._connection.get_grammar()(table=table)
         query = grammar.drop_table(table).to_sql()
         if query_only:
             return query
-        return bool(cls._connection().make_connection().query(query))
+        return bool(cls._connection().make_connection().query(query, ()))
 
     @classmethod
     def drop(cls, *args, **kwargs):
@@ -117,15 +115,15 @@ class Schema:
 
     @classmethod
     def drop_table_if_exists(cls, table, exists=False, query_only=True):
-        grammar = cls._connection.get_grammer()(table=table)
+        grammar = cls._connection.get_grammar()(table=table)
         query = grammar.drop_table_if_exists(table).to_sql()
         if query_only:
             return query
-        return bool(cls._connection().make_connection().query(query))
+        return bool(cls._connection().make_connection().query(query, ()))
 
     @classmethod
     def rename(cls, table, new_name, query_only=False):
-        grammar = cls._connection.get_grammer()(table=table)
+        grammar = cls._connection.get_grammar()(table=table)
         query = grammar.rename_table(
             current_table_name=table, new_table_name=new_name
         ).to_sql()
@@ -135,7 +133,7 @@ class Schema:
 
     @classmethod
     def truncate(cls, table, query_only=True):
-        grammar = cls._connection.get_grammer()(table=table)
+        grammar = cls._connection.get_grammar()(table=table)
         query = grammar.truncate_table(table=table).to_sql()
         if query_only:
             return query
@@ -149,10 +147,10 @@ class Schema:
         Returns:
             masonite.orm.blueprint.Blueprint -- The Masonite ORM blueprint object.
         """
-        grammar = cls._connection.get_grammer()(
+        grammar = cls._connection.get_grammar()(
             table=table, database=cls._connection.get_database_name()
         )
         query = grammar.table_exists().to_sql()
         if query_only:
             return query
-        return bool(cls._connection().make_connection().query(query))
+        return bool(cls._connection().make_connection().query(query, ()))

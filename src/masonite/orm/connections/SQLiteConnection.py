@@ -7,14 +7,25 @@ class SQLiteConnection(BaseConnection):
     """SQLite Connection class.
     """
 
+    name = "sqlite"
+    _connection = None
+
     def make_connection(self):
         """This sets the connection on the connection class
         """
         connection_details = self.get_connection_details()
-        self._connection = sqlite3.connect(connection_details.get("db"))
-        self._connection.row_factory = sqlite3.Row
+        if self.__class__._connection:
+            return self
+        self.__class__._connection = sqlite3.connect(
+            connection_details.get("db"), isolation_level=None
+        )
+        self.__class__._connection.row_factory = sqlite3.Row
 
         return self
+
+    @classmethod
+    def get_database_name(self):
+        return self().get_connection_details().get("db")
 
     def get_connection_details(self):
         """This is responsible for standardizing the normal connection
@@ -24,8 +35,9 @@ class SQLiteConnection(BaseConnection):
         that should pass to your connection method
         """
         connection_details = {}
-        connection_details.setdefault("db", self.connections.get("database"))
-        connection_details.update(self.connections.get("options", {}))
+        connection_details.setdefault(
+            "db", self.connection_details.get("database"))
+        connection_details.update(self.connection_details.get("options", {}))
 
         return connection_details
 
@@ -35,17 +47,21 @@ class SQLiteConnection(BaseConnection):
     def commit(self):
         """Transaction
         """
-        pass
+        print('commit transaction')
+        return self.__class__._connection.commit()
 
-    def begin_transaction(self):
+    def begin(self):
         """Transaction
         """
-        pass
+        print('starting sqlite transaction', self, self.__class__._connection)
+        self.__class__._connection.isolation_level = 'DEFERRED'
+        return self.__class__._connection
 
     def rollback(self):
         """Transaction
         """
-        pass
+        print('rolling back transaction', self, self.__class__._connection)
+        self.__class__._connection.rollback()
 
     def query(self, query, bindings, results="*"):
         """Make the actual query that will reach the database and come back with a result.
@@ -62,8 +78,9 @@ class SQLiteConnection(BaseConnection):
             dict|None -- Returns a dictionary of results or None
         """
         query = query.replace("'?'", "?")
+        print("running query: ", query)
         try:
-            cursor = self._connection.cursor()
+            cursor = self.__class__._connection.cursor()
             cursor.execute(query, bindings)
             if results == 1:
                 result = [dict(row) for row in cursor.fetchall()]
@@ -71,5 +88,8 @@ class SQLiteConnection(BaseConnection):
                     return result[0]
             else:
                 return [dict(row) for row in cursor.fetchall()]
-        finally:
-            self._connection.close()
+        except Exception as e:
+            if self.__class__._connection and self.__class__._connection.isolation_level:
+                self.rollback()
+            raise e
+

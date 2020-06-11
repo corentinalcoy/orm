@@ -1,5 +1,3 @@
-import pymysql.cursors
-
 from .BaseGrammar import BaseGrammar
 
 
@@ -31,10 +29,10 @@ class MySQLGrammar(BaseGrammar):
         "integer": "INT",
         "big_integer": "BIGINT",
         "tiny_integer": "TINYINT",
-        "big_increments": "BIGINT",
+        "big_increments": "BIGINT AUTO_INCREMENT",
         "small_integer": "SMALLINT",
         "medium_integer": "MEDIUMINT",
-        "increments": "INT AUTO_INCREMENT PRIMARY KEY",
+        "increments": "INT UNSIGNED AUTO_INCREMENT PRIMARY KEY",
         "binary": "LONGBLOB",
         "boolean": "BOOLEAN",
         "decimal": "DECIMAL",
@@ -54,7 +52,7 @@ class MySQLGrammar(BaseGrammar):
         "datetime": "DATETIME",
         "tiny_increments": "TINYINT AUTO_INCREMENT",
         "unsigned": "INT UNSIGNED",
-        "unsigned_integer": "UNSIGNED INT",
+        "unsigned_integer": "INT UNSIGNED",
     }
 
     on_delete_mapping = {
@@ -69,10 +67,40 @@ class MySQLGrammar(BaseGrammar):
         None: "",
     }
 
+    options = {
+        "create_constraints_as_separate_queries": False,  # Whether constraints should run as separate queries or part of the create table semantics
+        "alter_constraints_as_separate_queries": False,  # Whether constraints should run as separate queries or part of the alter table semantics
+        "second_query_constraints": (),  # constraint types that should run as separate queries
+        "can_compile_multiple_index": True,  # INDEX("column1", "column2")
+    }
+
+    """Column strings are formats for how columns and key values should be formatted
+    on specific queries. These can be different depending on the type of query.
+
+    For example for Postgres, You can specify columns as "users"."name":
+
+        SELECT "users"."name" from "users"
+
+    But on updates we can only specify the column name and cannot have the table prefixed:
+
+        UPDATE "users" SET "name" = "value"
+
+    This dictionary allows you to modify the format depending on the type
+    of query we are generating. For most databases these will be the same
+    but this allows you to modify formats depending on the database.
+    """
+
+    column_strings = {
+        "select": "`{table}`.`{column}`{separator}",
+        "insert": "`{table}`.`{column}`{separator}",
+        "update": "`{table}`.`{column}`{separator}",
+        "delete": "`{table}`.`{column}`{separator}",
+    }
+
     timestamp_mapping = {"current": "CURRENT_TIMESTAMP", "now": "NOW()"}
 
     def select_format(self):
-        return "SELECT {columns} FROM {table} {joins} {wheres} {group_by}{order_by}{limit} {offset} {having}"
+        return "SELECT {columns} FROM {table} {joins} {wheres} {group_by}{order_by} {limit} {offset} {having}"
 
     def update_format(self):
         return "UPDATE {table} SET {key_equals} {wheres}"
@@ -152,17 +180,17 @@ class MySQLGrammar(BaseGrammar):
     def alter_start(self):
         return "ALTER TABLE {table} "
 
-    def create_column_length(self):
+    def create_column_length(self, column_type):
         return "({length})"
 
     def unique_constraint_string(self):
         return "CONSTRAINT {index_name} UNIQUE ({clean_column}){separator}"
 
-    def unique_alter_constraint_string(self):
-        return "ADD CONSTRAINT {index_name} UNIQUE({column}){separator}"
-
     def index_constraint_string(self):
         return "INDEX ({column}){separator}"
+
+    def primary_key_string(self):
+        return "{table}_primary"
 
     def fulltext_constraint_string(self):
         return "FULLTEXT ({column}){separator}"
@@ -184,9 +212,6 @@ class MySQLGrammar(BaseGrammar):
 
     def column_string(self):
         return "`{column}`{separator}"
-
-    def table_column_string(self):
-        return "`{table}`.`{column}`{separator}"
 
     def value_string(self):
         return "'{value}'{separator}"
@@ -211,6 +236,9 @@ class MySQLGrammar(BaseGrammar):
 
     def where_in_string(self):
         return "WHERE IN ({values})"
+
+    def value_equal_string(self):
+        return "{keyword} {value1} = {value2}"
 
     def where_string(self):
         return " {keyword} {column} {equality} {value}"
@@ -241,6 +269,9 @@ class MySQLGrammar(BaseGrammar):
 
     def rename_table_string(self):
         return "RENAME TABLE {current_table_name} TO {new_table_name}"
+
+    def create_unique_column_string(self):
+        return "ADD CONSTRAINT {index_name} UNIQUE({column}){separator}"
 
     def drop_index_column_string(self):
         return "DROP INDEX {column} "

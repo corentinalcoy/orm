@@ -1,8 +1,7 @@
-import pymysql
-
-from .BaseConnection import BaseConnection
-
 import random
+
+from ..exceptions import DriverNotFound
+from .BaseConnection import BaseConnection
 
 CONNECTION_POOL = []
 
@@ -11,9 +10,22 @@ class MySQLConnection(BaseConnection):
     """MYSQL Connection class.
     """
 
+    name = "mysql"
+
     def make_connection(self):
         """This sets the connection on the connection class
         """
+
+        if self._dry:
+            return
+
+        try:
+            import pymysql
+        except ModuleNotFoundError:
+            raise DriverNotFound(
+                "You must have the 'pymysql' package installed to make a connection to MySQL. Please install it using 'pip install pymysql'"
+            )
+
         if len(CONNECTION_POOL) < 10:
             self._connection = pymysql.connect(
                 cursorclass=pymysql.cursors.DictCursor,
@@ -37,7 +49,7 @@ class MySQLConnection(BaseConnection):
         """
         connection_details = {}
         connection_details.setdefault("host", self.connection_details.get("host"))
-        connection_details.setdefault("user", self.connection_details.get("username"))
+        connection_details.setdefault("user", self.connection_details.get("user"))
         connection_details.setdefault(
             "password", self.connection_details.get("password")
         )
@@ -51,28 +63,25 @@ class MySQLConnection(BaseConnection):
     def get_database_name(self):
         return self().get_connection_details().get("db")
 
-    def reconnect(self):
-        pass
-
     def commit(self):
         """Transaction
         """
-        pass
+        return self._connection.commit()
 
-    def begin_transaction(self):
+    def begin(self):
         """Transaction
         """
-        pass
+        return self._connection.begin()
 
     def rollback(self):
         """Transaction
         """
-        pass
+        self._connection.rollback()
 
-    def transaction_level(self):
-        """Transaction
-        """
-        pass
+    # def transaction_level(self):
+    #     """Transaction
+    #     """
+    #     pass
 
     def query(self, query, bindings=(), results="*"):
         """Make the actual query that will reach the database and come back with a result.
@@ -89,7 +98,7 @@ class MySQLConnection(BaseConnection):
             dict|None -- Returns a dictionary of results or None
         """
         query = query.replace("'?'", "%s")
-        # print("running query", query)
+        print("running query", query, bindings)
         try:
             with self._connection.cursor() as cursor:
                 cursor.execute(query, bindings)
@@ -97,5 +106,7 @@ class MySQLConnection(BaseConnection):
                     return cursor.fetchone()
                 else:
                     return cursor.fetchall()
+        except Exception as e:
+            raise e
         finally:
             pass

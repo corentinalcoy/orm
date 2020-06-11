@@ -12,6 +12,8 @@ from ..expressions.expressions import (
     HavingExpression,
 )
 
+from ..schema import Schema
+
 
 class QueryBuilder:
     """A builder class to manage the building and creation of query expressions.
@@ -27,7 +29,9 @@ class QueryBuilder:
         connection_details={},
         scopes={},
         global_scopes={},
+        eager_loads=(),
         owner=None,
+        dry=False,
     ):
         """QueryBuilder initializer
 
@@ -48,7 +52,11 @@ class QueryBuilder:
         if scopes:
             self._scopes.update(scopes)
         self.boot()
+        self._updates = ()
+        self.builder = self
         self.set_action("select")
+        self._should_eager = True
+        self._eager_loads = eager_loads
 
         # Get the connection and grammar class.
         if not self.grammar:
@@ -64,6 +72,9 @@ class QueryBuilder:
             driver = connection_dictionary.get("driver")
             self.connection = ConnectionFactory().make(driver)
             self.grammar = GrammarFactory().make(grammar)
+
+        if self.connection and dry is not True:
+            self.connection = self.connection().make_connection()
 
         if not self.owner:
             from ..models import QueryResult
@@ -92,6 +103,56 @@ class QueryBuilder:
             self
         """
         return self._table
+
+    def get_connection(self):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return self.connection
+
+    def begin(self):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return self.connection.begin()
+
+    def begin_transaction(self, *args, **kwargs):
+        return self.begin(*args, **kwargs)
+
+    def get_schema_builder(self):
+        return Schema.on(self.connection.name)
+
+    def commit(self):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return self.connection.commit()
+
+    def rollback(self):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return self.connection.rollback()
 
     def get_relation(self, key):
         """Sets a table on the query builder
@@ -163,7 +224,7 @@ class QueryBuilder:
         self._sql_binding = ""
         self._bindings = ()
 
-        self._updates = {}
+        self._updates = ()
 
         self._wheres = ()
         self._order_by = ()
@@ -196,7 +257,7 @@ class QueryBuilder:
         self._columns += (SelectExpression(string, raw=True),)
         return self
 
-    def create(self, creates, query=False):
+    def create(self, creates={}, query=False, **kwargs):
         """Specifies a dictionary that should be used to create new values.
 
         Arguments:
@@ -205,12 +266,17 @@ class QueryBuilder:
         Returns:
             self
         """
+        if not creates:
+            creates = kwargs
         self.set_action("insert")
         self._creates.update(creates)
         if query:
             return self
 
-        return self.connection().make_connection().query(self.to_sql(), self._bindings)
+        self.connection.query(self.to_sql(), self._bindings)
+        if self.owner:
+            return self.owner.hydrate(creates)
+        return creates
 
     def delete(self, column=None, value=None, query=False):
         """Specify the column and value to delete
@@ -233,7 +299,7 @@ class QueryBuilder:
         if query:
             return self
 
-        return self.connection().make_connection().query(self.to_sql(), self._bindings)
+        return self.connection.query(self.to_sql(), self._bindings)
 
     def where(self, column, *args):
         """Specifies a where expression.
@@ -249,6 +315,13 @@ class QueryBuilder:
         """
 
         operator, value = self._extract_operator_value(*args)
+
+        if value is None:
+            value = ""
+        elif value is True:
+            value = "1"
+        elif value is False:
+            value = "0"
 
         if inspect.isfunction(column):
             builder = column(self.new())
@@ -342,7 +415,7 @@ class QueryBuilder:
         Returns:
             self
         """
-        self.where(column, None)
+        self._wheres += ((QueryExpression(column, "=", None, "NULL")),)
         return self
 
     def where_not_null(self, column: str):
@@ -354,7 +427,7 @@ class QueryBuilder:
         Returns:
             self
         """
-        self.where(column, True)
+        self._wheres += ((QueryExpression(column, "=", True, "NOT NULL")),)
         return self
 
     def between(self, column: str, low: [str, int], high: [str, int]):
@@ -397,7 +470,10 @@ class QueryBuilder:
         Returns:
             self
         """
-        if isinstance(wheres, QueryBuilder):
+        if not wheres:
+            self._wheres += ((QueryExpression(0, "=", 1, "value_equals")),)
+
+        elif isinstance(wheres, QueryBuilder):
             self._wheres += (
                 (QueryExpression(column, "IN", SubSelectExpression(wheres))),
             )
@@ -543,12 +619,27 @@ class QueryBuilder:
         Returns:
             self
         """
-        self._updates = (UpdateQueryExpression(updates),)
+        self._updates += (UpdateQueryExpression(updates),)
         self.set_action("update")
         if dry:
             return self
 
-        return self.connection().make_connection().query(self.to_sql(), self._bindings)
+        return self.connection.query(self.to_sql(), self._bindings)
+
+    def set_updates(self, updates: dict, dry=False):
+        """Specifies columns and values to be updated.
+
+        Arguments:
+            updates {dictionary} -- A dictionary of columns and values to update.
+
+        Keyword Arguments:
+            dry {bool} -- Whether the query should be executed. (default: {False})
+
+        Returns:
+            self
+        """
+        self._updates += (UpdateQueryExpression(updates),)
+        return self
 
     def increment(self, column, value=1):
         """Increments a column's value.
@@ -562,7 +653,9 @@ class QueryBuilder:
         Returns:
             self
         """
-        self._updates = (UpdateQueryExpression(column, value, update_type="increment"),)
+        self._updates += (
+            UpdateQueryExpression(column, value, update_type="increment"),
+        )
         self.set_action("update")
         return self
 
@@ -578,7 +671,9 @@ class QueryBuilder:
         Returns:
             self
         """
-        self._updates = (UpdateQueryExpression(column, value, update_type="decrement"),)
+        self._updates += (
+            UpdateQueryExpression(column, value, update_type="decrement"),
+        )
         self.set_action("update")
         return self
 
@@ -663,12 +758,11 @@ class QueryBuilder:
         self.set_action("select")
         if query:
             return self.limit(1)
-
-        return self.owner.hydrate(
-            self.connection()
-            .make_connection()
-            .query(self.limit(1).to_qmark(), self._bindings, results=1)
+        result = self.connection.query(
+            self.limit(1).to_qmark(), self._bindings, results=1
         )
+        relations = self.eager_load_model(result)
+        return self.owner.hydrate(result, relations=relations)
 
     def all(self):
         """Returns all records from the table.
@@ -677,7 +771,8 @@ class QueryBuilder:
             dictionary -- Returns a dictionary of results.
         """
         return self.owner.hydrate(
-            self.connection().make_connection().query(self.to_qmark(), self._bindings)
+            self.connection.query(
+                self.to_qmark(), self._bindings) or self.owner.new_collection([])
         )
 
     def get(self):
@@ -687,18 +782,83 @@ class QueryBuilder:
             self
         """
         self.set_action("select")
-        result = (
-            self.connection().make_connection().query(self.to_qmark(), self._bindings)
+        result = self.connection.query(self.to_qmark(), self._bindings)
+        relations = self.eager_load_model(result)
+        return self.owner.new_collection(result).map_into(
+            self.owner, "hydrate", relations=relations
         )
-        if self.owner._eager_load:
-            for eager in self.owner._eager_load:
-                relationship_result = (
+
+    def without_eager(self):
+        self._should_eager = False
+        return self
+
+    def with_(self, eagers=()):
+        self._eager_loads += tuple(eagers)
+        return self
+
+    def eager_load_model(self, result):
+        eager_dic = {}
+        if not self._should_eager:
+            return {}
+
+        for eager in self._eager_loads:
+            if "." in eager:
+                last_owner = self.owner
+                last_eager = None
+                for split_eager in eager.split("."):
+                    if split_eager in eager_dic:
+                        related = getattr(last_owner, split_eager)()
+                        last_owner = related.owner
+                        last_eager = split_eager
+                        continue
+
+                    relationship = last_owner._registered_relationships[last_owner][
+                        split_eager
+                    ]
+                    foreign_key, local_key = (
+                        relationship["foreign"],
+                        relationship["local"],
+                    )
+                    related = getattr(last_owner, split_eager)()
+
+                    result = (
+                        related.without_eager()
+                        .where_in(
+                            foreign_key,
+                            Collection(result).unique(local_key).pluck(local_key),
+                        )
+                        .get()
+                    )
+
+                    # try to load the inners into the outer query
+                    # For logo need to get articles and loop through collection
+                    if last_eager and last_eager in eager_dic:
+                        eager_dic[last_eager].add_relation({split_eager: result})
+                    else:
+                        eager_dic.update({split_eager: result})
+                    last_owner = related.owner
+                    last_eager = split_eager
+            else:
+                relationship = self.owner._registered_relationships[self.owner][eager]
+
+                foreign_key, local_key = (
+                    relationship["foreign"],
+                    relationship["local"],
+                )
+
+                result = (
                     getattr(self.owner, eager)()
-                    .where_in("id", Collection(result).pluck("id"))
+                    .without_eager()
+                    .where_in(
+                        foreign_key,
+                        Collection(result).unique(local_key).pluck(local_key),
+                    )
                     .get()
                 )
-                self.owner._relationships[eager] = relationship_result
-        return self.owner.new_collection(result).map_into(self.owner, "hydrate")
+
+                eager_dic.update({eager: result})
+
+        return eager_dic
 
     def set_action(self, action):
         """Sets the action that the query builder should take when the query is built.
@@ -748,17 +908,14 @@ class QueryBuilder:
 
         if not self._action:
             self.set_action("select")
-
         for scope in self._global_scopes.get(self.owner, {}).get(self._action, []):
             if not scope:
                 continue
+
             scope(self.owner, self)
 
         grammar = self.get_grammar()
-
-        sql = getattr(
-            grammar, "_compile_{action}".format(action=self._action)
-        )().to_sql()
+        sql = grammar.compile(self._action).to_sql()
         self.boot()
         return sql
 
