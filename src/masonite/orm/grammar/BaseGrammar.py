@@ -24,6 +24,7 @@ class BaseGrammar:
         self,
         columns=(),
         table="users",
+        database=None,
         wheres=(),
         limit=False,
         offset=False,
@@ -40,6 +41,7 @@ class BaseGrammar:
     ):
         self._columns = columns
         self.table = table
+        self.database = database
         self._wheres = wheres
         self._limit = limit
         self._offset = offset
@@ -312,14 +314,14 @@ class BaseGrammar:
         sql = ""
         for join in self._joins:
             local_table = join.column1.split(".")[0]
-            column1 = join.column1.split(".")[1]
-            column2 = join.column2.split(".")[1]
+            column1 = join.column1
+            column2 = join.column2
             sql += self.join_string().format(
                 foreign_table=self._compile_table(join.foreign_table),
                 local_table=self._compile_table(local_table),
-                column1=self._compile_column(column1),
+                column1=self._table_column_string(column1),
                 equality=join.equality,
-                column2=self._compile_column(column2),
+                column2=self._table_column_string(column2),
                 keyword=self.join_keywords[join.clause],
             )
             sql += " "
@@ -379,7 +381,7 @@ class BaseGrammar:
             if isinstance(column, dict):
                 for key, value in column.items():
                     sql += sql_string.format(
-                        column=self._compile_column(key),
+                        column=self._table_column_string(key),
                         value=value if not qmark else "?",
                         separator=", ",
                     )
@@ -388,7 +390,7 @@ class BaseGrammar:
                         self._bindings += (value,)
             else:
                 sql += sql_string.format(
-                    column=self._compile_column(column),
+                    column=self._table_column_string(column),
                     value=value if not qmark else "?",
                 )
                 if qmark:
@@ -415,7 +417,7 @@ class BaseGrammar:
 
             sql += aggregate_string.format(
                 aggregate_function=aggregate_function,
-                column="*" if column == "*" else self._compile_column(column),
+                column="*" if column == "*" else self._table_column_string(column),
                 alias=self._compile_alias(column),
             )
 
@@ -431,7 +433,7 @@ class BaseGrammar:
         for order_bys in self._order_by:
             column, direction = order_bys
             sql += self.order_by_string().format(
-                column=self._compile_column(column), direction=direction.upper(),
+                column=self._table_column_string(column), direction=direction.upper(),
             )
 
         return sql
@@ -445,7 +447,7 @@ class BaseGrammar:
         sql = ""
         for group_bys in self._group_by:
             column = group_bys
-            sql += "GROUP BY {column}".format(column=self._compile_column(column))
+            sql += "GROUP BY {column}".format(column=self._table_column_string(column))
 
         return sql
 
@@ -518,7 +520,7 @@ class BaseGrammar:
                 sql_string = self.having_equality_string()
 
             sql += sql_string.format(
-                column=self._compile_column(column),
+                column=self._table_column_string(column),
                 equality=equality,
                 value=self._compile_value(value),
             )
@@ -557,7 +559,7 @@ class BaseGrammar:
             elif where.keyword == "or":
                 keyword = self.or_where_string()
             else:
-                keyword = self.additional_where_string()
+                keyword = " " + self.additional_where_string()
 
             if where.raw:
                 """If we have a raw query we just want to use the query supplied
@@ -573,7 +575,7 @@ class BaseGrammar:
 
             """The column is an easy compile
             """
-            column = self._compile_column(column)
+            column = self._table_column_string(column)
 
             """Need to find which type of where string it is.
             If it is a WHERE NULL, WHERE EXISTS, WHERE `col` = 'val' etc
@@ -582,14 +584,14 @@ class BaseGrammar:
                 sql_string = self.between_string().format(
                     low=self._compile_value(where.low),
                     high=self._compile_value(where.high),
-                    column=self._compile_column(where.column),
+                    column=self._table_column_string(where.column),
                     keyword=keyword,
                 )
             elif equality == "NOT BETWEEN":
                 sql_string = self.not_between_string().format(
                     low=self._compile_value(where.low),
                     high=self._compile_value(where.high),
-                    column=self._compile_column(where.column),
+                    column=self._table_column_string(where.column),
                     keyword=keyword,
                 )
             elif value is None:
@@ -631,9 +633,9 @@ class BaseGrammar:
             elif value_type == "value":
                 query_value = self.value_string().format(value=value, separator="")
             elif value_type == "column":
-                query_value = self.column_string().format(column=value, separator="")
+                query_value = self._table_column_string(column=value, separator="")
             elif value_type == "having":
-                query_value = self.column_string().format(column=value, separator="")
+                query_value = self._table_column_string(column=value, separator="")
             else:
                 query_value = ""
 
@@ -673,7 +675,9 @@ class BaseGrammar:
             self
         """
         self._sql = self.table_exists_string().format(
-            table=self._compile_table(self.table)
+            table=self._compile_table(self.table),
+            database=self.database,
+            clean_table=self.table,
         )
         return self
 
@@ -715,7 +719,6 @@ class BaseGrammar:
             self
         """
         sql = ""
-
         if self._columns != "*":
             for column in self._columns:
                 if isinstance(column, SelectExpression):
@@ -724,14 +727,13 @@ class BaseGrammar:
                         continue
 
                     column = column.column
-                sql += self._compile_column(column, separator=separator)
+                sql += self._table_column_string(column, separator=separator)
 
         if self._aggregates:
             sql += self._compile_aggregates()
 
         if sql == "":
             return "*"
-
         return sql.rstrip(",").rstrip(", ")
 
     def _compile_values(self, separator=""):
@@ -746,8 +748,7 @@ class BaseGrammar:
         sql = ""
         if self._columns == "*":
             return self._columns
-
-        for column, value in self._columns.items():
+        for column, value in dict(self._columns).items():
             sql += self._compile_value(value, separator=separator)
 
         return sql[:-2]
@@ -764,8 +765,31 @@ class BaseGrammar:
         Returns:
             self
         """
+        table = None
+        if column and "." in column:
+            table, column = column.split(".")
         return self.column_string().format(
-            column=column, separator=separator, table=self.table
+            column=column, separator=separator, table=table or self.table
+        )
+
+    def _table_column_string(self, column, separator=""):
+        """Compiles a column into the column syntax.
+
+        Arguments:
+            column {string} -- The name of the column.
+
+        Keyword Arguments:
+            separator {string} -- The separator used between columns (default: {""})
+
+        Returns:
+            self
+        """
+        table = None
+        if column and "." in column:
+            table, column = column.split(".")
+
+        return self.table_column_string().format(
+            column=column, separator=separator, table=table or self.table
         )
 
     def _compile_value(self, value, separator=""):

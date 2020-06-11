@@ -26,6 +26,7 @@ class Model:
     __resolved_connection__ = None
     _eager_load = ()
     _relationships = {}
+    _registered_relationships = {}
     _booted = False
     __primary_key__ = "id"
     __casts__ = {}
@@ -50,7 +51,6 @@ class Model:
 
     @classmethod
     def boot(cls):
-
         if not cls._booted:
             cls.__resolved_connection__ = ConnectionFactory().make(cls.__connection__)
             cls.builder = QueryBuilder(
@@ -99,6 +99,11 @@ class Model:
         return cls.__table__ or tableize(cls.__name__)
 
     @classmethod
+    def get_database_name(cls):
+        cls.boot()
+        return cls.__resolved_connection__
+
+    @classmethod
     def first(cls):
         return cls.builder.first()
 
@@ -131,23 +136,98 @@ class Model:
         return cls.builder.where(*args, **kwargs)
 
     @classmethod
+    def order_by(cls, *args, **kwargs):
+        cls.boot()
+        return cls.builder.order_by(*args, **kwargs)
+
+    @classmethod
+    def where_in(cls, *args, **kwargs):
+        cls.boot()
+        return cls.builder.where(*args, **kwargs)
+
+    @classmethod
+    def has(cls, *has_relationships, **kwargs):
+        cls.boot()
+        for has_relationship in has_relationships:
+            if "." in has_relationship:
+                # Get nested relationship
+                last_builder = cls.builder
+                for split_has_relationship in has_relationship.split("."):
+                    local_key = cls._registered_relationships[last_builder.owner][
+                        split_has_relationship
+                    ]["local"]
+                    foreign_key = cls._registered_relationships[last_builder.owner][
+                        split_has_relationship
+                    ]["foreign"]
+                    relationship = last_builder.get_relation(split_has_relationship)()
+
+                    last_builder.where_exists(
+                        relationship.where_column(
+                            f"{relationship.get_table_name()}.{foreign_key}",
+                            f"{last_builder.get_table_name()}.{local_key}",
+                        )
+                    )
+
+                    last_builder = relationship
+            else:
+                relationship = getattr(cls, has_relationship)()
+                local_key = cls._registered_relationships[cls][has_relationship][
+                    "local"
+                ]
+                foreign_key = cls._registered_relationships[cls][has_relationship][
+                    "foreign"
+                ]
+                cls.builder.where_exists(
+                    relationship.where_column(
+                        f"{relationship.get_table_name()}.{foreign_key}",
+                        f"{cls.builder.get_table_name()}.{local_key}",
+                    )
+                )
+        return cls.builder
+
+    @classmethod
+    def where_has(cls, has_relationship, callback):
+        cls.boot()
+        relationship = getattr(cls, has_relationship)()
+
+        local_key = cls._registered_relationships[cls][has_relationship]["local"]
+        foreign_key = cls._registered_relationships[cls][has_relationship]["foreign"]
+
+        callback(
+            relationship.where_column(
+                f"{relationship.get_table_name()}.{foreign_key}",
+                f"{cls.builder.get_table_name()}.{local_key}",
+            )
+        )
+
+        cls.builder.where_exists(relationship)
+
+        return cls.builder
+
+    @classmethod
     def limit(cls, *args, **kwargs):
         cls.boot()
         return cls.builder.limit(*args, **kwargs)
 
-    def select(self):
-        pass
+    @classmethod
+    def select(cls, *args, **kwargs):
+        cls.boot()
+        return cls.builder.select(*args, **kwargs)
 
     @classmethod
     def hydrate(cls, dictionary):
-        if isinstance(dictionary, list):
+        if isinstance(dictionary, (list, tuple)):
             response = []
             for element in dictionary:
                 response.append(element)
             return cls.new_collection(response)
-        else:
+        elif isinstance(dictionary, dict):
             model = cls()
             model.__attributes__.update(dictionary or {})
+            return model
+        else:
+            model = cls()
+            model.__attributes__.update(dictionary.__attributes__)
             return model
 
     @classmethod
@@ -158,12 +238,14 @@ class Model:
         pass
 
     @classmethod
-    def create(cls, dictionary):
+    def create(cls, dictionary, query=False):
         cls.boot()
         if cls.__fillable__ != ["*"]:
             dictionary = {x: dictionary[x] for x in cls.__fillable__}
-        to_sql = cls.builder.create(dictionary).to_sql()
-        return to_sql
+        if query:
+            return cls.builder.create(dictionary, query=True).to_sql()
+
+        return cls.builder.create(dictionary)
 
     def delete(self):
         pass
@@ -253,3 +335,6 @@ class Model:
         cls.boot()
         cls._eager_load += eagers
         return cls.builder
+
+    def __getitem__(self, attribute):
+        return getattr(self, attribute)

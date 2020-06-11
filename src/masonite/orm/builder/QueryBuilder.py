@@ -82,6 +82,28 @@ class QueryBuilder:
         self._table = table
         return self
 
+    def get_table_name(self):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return self._table
+
+    def get_relation(self, key):
+        """Sets a table on the query builder
+
+        Arguments:
+            table {string} -- The name of the table
+
+        Returns:
+            self
+        """
+        return getattr(self.owner, key)
+
     def set_scope(self, cls, name):
         """Sets a scope based on a class and maps it to a name.
 
@@ -174,7 +196,7 @@ class QueryBuilder:
         self._columns += (SelectExpression(string, raw=True),)
         return self
 
-    def create(self, creates):
+    def create(self, creates, query=False):
         """Specifies a dictionary that should be used to create new values.
 
         Arguments:
@@ -183,11 +205,14 @@ class QueryBuilder:
         Returns:
             self
         """
-        self._creates.update(creates)
         self.set_action("insert")
-        return self
+        self._creates.update(creates)
+        if query:
+            return self
 
-    def delete(self, column=None, value=None):
+        return self.connection().make_connection().query(self.to_sql(), self._bindings)
+
+    def delete(self, column=None, value=None, query=False):
         """Specify the column and value to delete
         or deletes everything based on a previously used where expression.
 
@@ -205,7 +230,10 @@ class QueryBuilder:
                 self.where(column, value)
 
         self.set_action("delete")
-        return self
+        if query:
+            return self
+
+        return self.connection().make_connection().query(self.to_sql(), self._bindings)
 
     def where(self, column, *args):
         """Specifies a where expression.
@@ -224,7 +252,9 @@ class QueryBuilder:
 
         if inspect.isfunction(column):
             builder = column(self.new())
-            self._wheres += ((QueryExpression(None, operator, SubGroupExpression(builder))),)
+            self._wheres += (
+                (QueryExpression(None, operator, SubGroupExpression(builder))),
+            )
         elif isinstance(value, QueryBuilder):
             self._wheres += (
                 (QueryExpression(column, operator, SubSelectExpression(value))),
@@ -375,6 +405,12 @@ class QueryBuilder:
             wheres = [str(x) for x in wheres]
             self._wheres += ((QueryExpression(column, "IN", wheres)),)
         return self
+
+    def has(self, *args, **kwargs):
+        return self.owner.has(*args, **kwargs)
+
+    def where_has(self, *args, **kwargs):
+        return self.owner.where_has(*args, **kwargs)
 
     def where_not_in(self, column, wheres=[]):
         """Specifies where a column does not contain a list of a values.
@@ -716,7 +752,6 @@ class QueryBuilder:
         for scope in self._global_scopes.get(self.owner, {}).get(self._action, []):
             if not scope:
                 continue
-
             scope(self.owner, self)
 
         grammar = self.get_grammar()
@@ -806,7 +841,10 @@ class QueryBuilder:
             value = args[0]
 
         if operator not in operators:
-            raise ValueError('Invalid comparison operator. The operator can be %s' % ", ".join(operators))
+            raise ValueError(
+                "Invalid comparison operator. The operator can be %s"
+                % ", ".join(operators)
+            )
 
         return operator, value
 
